@@ -46,6 +46,8 @@ int main(int argc, char const *argv[])
         ChannelFactory::Instance()->Init(0, argv[2]);
     }
 
+    std::cout << "About to construct controller" << std::endl;
+
     BasicUserController* user_ctrl;
     // load config and user_controller according to the argument
     if(argv[1] == std::string("simple_rl"))
@@ -63,11 +65,18 @@ int main(int argc, char const *argv[])
         std::string config_file_dir = param / "ts_config.yaml";
         user_ctrl = new TSController(config_file_dir);
     }
+    else if(argv[1] == std::string("pact_pos"))
+    {
+        std::string config_file_dir = param / "go2_pact_pos_config.yaml";
+        user_ctrl = new PACTPosController(config_file_dir);
+    }
     else
     {
         std::cerr << "Unknown controller type: " << argv[1] << std::endl;
         return -1;
     }
+
+    std::cout << "Made it past controller creation" << std::endl;
 
     RobotController* robot_controller = new RobotController(log_file_name, user_ctrl);
     // load neural network model

@@ -1,0 +1,49 @@
+policy_name: "go2_pactpos_Apr06_21-12-58_pact_pos_100hz_spec_jointrand.pt"
+use_genesis: True
+dt: 0.01
+
+stand_kp: 60.0
+stand_kd: 5.0
+
+ctrl_kp: 50.0
+ctrl_kd: 1.0
+
+action_scale: 0.25
+
+lin_vel_scale: 1.0
+ang_vel_scale: 0.25
+dof_pos_scale: 1.0
+dof_vel_scale: 0.05
+
+frame_stack: 20
+num_single_obs: 57   # length of single step observation
+
+stand_pos: [
+    -0.1,
+    0.8,
+    -1.5,
+    0.1,
+    0.8,
+    -1.5,
+    -0.1,
+    0.8,
+    -1.5,
+    0.1,
+    0.8,
+    -1.5
+]
+
+sit_pos: [            # For transition from damping to sitting
+    0.04,
+    1.3,
+    -2.87,
+    -0.02,
+    1.29,
+    -2.86,
+    -0.33,
+    1.27,
+    -2.81,
+    0.32,
+    1.28,
+    -2.87
+]
