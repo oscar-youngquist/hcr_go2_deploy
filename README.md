@@ -17,7 +17,7 @@ the Jetson itself.
 
    ```bash
    sudo apt update
-   sudo apt install libyaml-cpp-dev
+   sudo apt install libyaml-cpp-dev libeigen3-dev
    ```
 
 2. Build and install [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2) on the target machine:
@@ -109,6 +109,32 @@ the Jetson itself.
       - L1 + R2 -> Stand
       - L1 + A -> Ctrl
       - L1 + B -> Stop
+      - D-pad left -> start CSV logging
+      - D-pad right -> stop, flush, and close CSV logging
+
+   PACT velocity commands are limited by `command_limit_max_abs` in `params/pact_config.yaml`:
+
+   ```yaml
+   # [linear_x m/s, linear_y m/s, angular_z rad/s]
+   command_limit_max_abs: [1.0, 0.5, 1.0]
+   ```
+
+   Each joystick axis is deadband-remapped to its configured range and then smoothed. This means full
+   stick produces the configured maximum magnitude while values inside the deadband produce zero.
+
+   Logs are written beneath `build/logs/<timestamp>/log.csv` and include sensed joint/IMU state,
+   desired commands, gains, feed-forward torque, velocity commands, and Kalman-filter torso estimates.
+
+## Estimator and watchdog
+
+The Go2 linear Kalman filter uses IMU, joint, and foot-force measurements. Its noise, contact threshold,
+and Go2 geometry are configured in `params/pact_config.yaml`; set `use_kalman_filter: false` to disable
+it. The estimates are diagnostic and logged, but are not part of the current 57-element policy input.
+
+`lowstate_timeout_ms` controls the low-state watchdog. If `rt/lowstate` becomes stale, both the policy
+loop and the 500 Hz publisher replace the active command with zero-Kp damping and return the state
+machine to `DAMPING`. Control does not automatically resume when messages return; use the normal
+gamepad transition sequence again after diagnosing the connection.
 
 ## Sim2Real
 

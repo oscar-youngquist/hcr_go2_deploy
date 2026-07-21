@@ -25,6 +25,7 @@ set(Torch_DIR "${PACT_TORCH_ROOT}/share/cmake/Torch" CACHE PATH "Directory conta
 find_package(unitree_sdk2 REQUIRED)
 find_package(Torch REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 message(STATUS "Target processor: ${CMAKE_SYSTEM_PROCESSOR}")
 message(STATUS "CUDA root: ${PACT_CUDA_ROOT}")
@@ -41,6 +42,7 @@ target_include_directories(go2_system PUBLIC
 target_link_libraries(go2_system
     unitree_sdk2
     yaml-cpp
+    Eigen3::Eigen
     ${TORCH_LIBRARIES})
 
 add_executable(go2_deploy

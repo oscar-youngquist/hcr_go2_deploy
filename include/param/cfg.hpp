@@ -246,6 +246,16 @@ namespace unitree::common
                 clip_obs = cfg["clip_observations"].as<float>();
                 frame_stack = cfg["frame_stack"].as<int>();
                 num_single_obs = cfg["num_single_obs"].as<int>();
+                if (cfg["command_limit_max_abs"])
+                {
+                    command_limit_max_abs.clear();
+                    for (const auto &v : cfg["command_limit_max_abs"])
+                        command_limit_max_abs.push_back(v.as<float>());
+                }
+                if (cfg["use_kalman_filter"]) use_kalman_filter = cfg["use_kalman_filter"].as<bool>();
+                if (cfg["log_flush_count"]) log_flush_count = cfg["log_flush_count"].as<int>();
+                if (cfg["log_loop_dt"]) log_loop_dt = cfg["log_loop_dt"].as<float>();
+                if (cfg["lowstate_timeout_ms"]) lowstate_timeout_ms = cfg["lowstate_timeout_ms"].as<int>();
                 for (const auto &v : cfg["stand_pos"]) stand_pos.push_back(v.as<float>());
                 for (const auto &v : cfg["sit_pos"]) sit_pos.push_back(v.as<float>());
                 for (const auto &v : cfg["joint_limit_max"]) pos_limit_max.push_back(v.as<float>());
@@ -264,7 +274,12 @@ namespace unitree::common
         float lin_vel_scale, ang_vel_scale, dof_pos_scale, dof_vel_scale;
         float clip_actions, clip_obs;
         int num_single_obs, frame_stack;
+        bool use_kalman_filter = true;
+        int log_flush_count = 500;
+        float log_loop_dt = 0.05f;
+        int lowstate_timeout_ms = 100;
         std::string policy_name;
+        std::vector<float> command_limit_max_abs = {1.0f, 0.5f, 1.0f};
         std::vector<float> stand_pos, sit_pos, pos_limit_min, pos_limit_max, tau_limit;
     };
 }

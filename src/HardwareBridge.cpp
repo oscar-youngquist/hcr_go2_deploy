@@ -1,5 +1,6 @@
 #include "HardwareBridge.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <iomanip>
@@ -19,6 +20,24 @@ namespace
 constexpr const char *kLowCmdTopic = "rt/lowcmd";
 constexpr const char *kLowStateTopic = "rt/lowstate";
 
+int64_t SteadyTimeNs()
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+template <size_t N>
+void AppendArrayHeaders(std::ostream &stream, const std::string &name)
+{
+    for (size_t i = 0; i < N; ++i) stream << ',' << name << '_' << i;
+}
+
+template <size_t N>
+void AppendArrayValues(std::ostream &stream, const std::array<float, N> &values)
+{
+    for (float value : values) stream << ',' << value;
+}
+
 const char *StateName(unsigned int state)
 {
     switch (static_cast<STATES>(state))
@@ -36,9 +55,27 @@ HardwareBridge::HardwareBridge(const std::string &config_file_path,
                                const std::filesystem::path &log_file_path,
                                bool deactivate_service)
     : ctrl(new PACTController(config_file_path)),
-      log_file(log_file_path),
+      log_file_path(log_file_path),
+      config_file_path(config_file_path),
       deactivate_motion_service(deactivate_service)
 {
+    const PACTRLCfg cfg(config_file_path);
+    if (cfg.command_limit_max_abs.size() != 3)
+        throw std::runtime_error("command_limit_max_abs must contain [linear_x, linear_y, angular_z]");
+    if (std::any_of(cfg.command_limit_max_abs.begin(), cfg.command_limit_max_abs.end(),
+                    [](float limit) { return limit < 0.0f; }))
+        throw std::runtime_error("command_limit_max_abs values must be non-negative");
+    gamepad.setCommandLimits({cfg.command_limit_max_abs[0],
+                              cfg.command_limit_max_abs[1],
+                              cfg.command_limit_max_abs[2]});
+    if (cfg.lowstate_timeout_ms <= 0 || cfg.log_flush_count <= 0 || cfg.log_loop_dt <= 0.0f)
+        throw std::runtime_error("watchdog and logging intervals/counts must be positive");
+    lowstate_timeout_ns = static_cast<int64_t>(cfg.lowstate_timeout_ms) * 1'000'000;
+    log_flush_count = static_cast<size_t>(cfg.log_flush_count);
+    log_loop_period_us = static_cast<uint64_t>(cfg.log_loop_dt * 1'000'000.0f);
+    log_buffer.reserve(log_flush_count);
+    if (cfg.use_kalman_filter)
+        torso_estimator = std::make_unique<LinearKFObserver>(config_file_path, cfg.dt);
 }
 
 HardwareBridge::~HardwareBridge()
@@ -51,6 +88,8 @@ void HardwareBridge::run()
     ctrl->loadParam();
     ctrl->loadPolicy();
     InitDdsModel();
+    logging_thread = CreateRecurrentThreadEx(
+        "logging", UT_CPU_ID_NONE, log_loop_period_us, &HardwareBridge::LoggingLoop, this);
 
     if (deactivate_motion_service)
     {
@@ -150,6 +189,7 @@ void HardwareBridge::LowStateMessageHandler(const void *message)
     std::lock_guard<std::mutex> lock(state_mutex);
     state = *static_cast<const unitree_go::msg::dds_::LowState_ *>(message);
     robot_interface.SetState(state);
+    last_lowstate_time_ns.store(SteadyTimeNs(), std::memory_order_release);
     motor0_position.store(state.motor_state()[0].q(), std::memory_order_relaxed);
     motor0_mode.store(state.motor_state()[0].mode(), std::memory_order_relaxed);
     lowstate_count.fetch_add(1, std::memory_order_relaxed);
@@ -165,6 +205,11 @@ void HardwareBridge::IntegrateGamepad()
 void HardwareBridge::LowCmdWriteHandler()
 {
     std::lock_guard<std::mutex> lock(cmd_mutex);
+    if (!IsLowStateFresh())
+    {
+        ApplyDampingCommand();
+        watchdog_active.store(true, std::memory_order_relaxed);
+    }
     const bool succeeded = lowcmd_publisher->Write(cmd);
     lowcmd_attempt_count.fetch_add(1, std::memory_order_relaxed);
     if (succeeded) lowcmd_success_count.fetch_add(1, std::memory_order_relaxed);
@@ -202,6 +247,7 @@ void HardwareBridge::PrintStatus()
               << " motor0_q_des="
               << desired_motor0_position.load(std::memory_order_relaxed)
               << " motor0_kp=" << desired_motor0_kp.load(std::memory_order_relaxed)
+              << " watchdog=" << (watchdog_active.load(std::memory_order_relaxed) ? "ACTIVE" : "ok")
               << " button_events:" << button_text.str()
               << std::endl;
 }
@@ -256,7 +302,22 @@ void HardwareBridge::UpdateStateMachine()
 
 void HardwareBridge::RobotControl()
 {
+    if (!IsLowStateFresh())
+    {
+        watchdog_active.store(true, std::memory_order_relaxed);
+        state_machine.Stop();
+        Damping();
+        {
+            std::lock_guard<std::mutex> lock(cmd_mutex);
+            SetCmd();
+        }
+        LogCurrentRobotInterface();
+        ++control_iteration;
+        return;
+    }
+    watchdog_active.store(false, std::memory_order_relaxed);
     IntegrateGamepad();
+    HandleLoggingButtons();
     UpdateStateMachine();
     reported_state.store(static_cast<unsigned int>(state_machine.state),
                          std::memory_order_relaxed);
@@ -269,6 +330,13 @@ void HardwareBridge::RobotControl()
     if (buttons != 0) reported_buttons.fetch_or(buttons, std::memory_order_relaxed);
     {
         std::lock_guard<std::mutex> lock(state_mutex);
+        if (torso_estimator)
+        {
+            torso_estimator->Update(state);
+            robot_interface.SetTorsoEstimate(torso_estimator->GetEstimatedPosition(),
+                                             torso_estimator->GetEstimatedVelocityWorld(),
+                                             torso_estimator->GetEstimatedVelocityBody());
+        }
         ctrl->GetInput(robot_interface, gamepad);
     }
 
@@ -284,7 +352,8 @@ void HardwareBridge::RobotControl()
         std::lock_guard<std::mutex> lock(cmd_mutex);
         SetCmd();
     }
-    WriteLog();
+    LogCurrentRobotInterface();
+    ++control_iteration;
 }
 
 void HardwareBridge::SitCallback()
@@ -352,10 +421,129 @@ void HardwareBridge::UserControlStep(bool send_cmd)
     }
 }
 
-void HardwareBridge::WriteLog()
+bool HardwareBridge::IsLowStateFresh() const
+{
+    const int64_t last = last_lowstate_time_ns.load(std::memory_order_acquire);
+    return last != 0 && SteadyTimeNs() - last <= lowstate_timeout_ns;
+}
+
+void HardwareBridge::ApplyDampingCommand(float kd)
+{
+    for (size_t i = 0; i < 12; ++i)
+    {
+        auto &motor = cmd.motor_cmd()[i];
+        motor.q() = 0.0f;
+        motor.dq() = 0.0f;
+        motor.kp() = 0.0f;
+        motor.kd() = kd;
+        motor.tau() = 0.0f;
+    }
+    desired_motor0_position.store(0.0f, std::memory_order_relaxed);
+    desired_motor0_kp.store(0.0f, std::memory_order_relaxed);
+    cmd.crc() = crc32_core(reinterpret_cast<uint32_t *>(&cmd),
+                           (sizeof(unitree_go::msg::dds_::LowCmd_) >> 2) - 1);
+}
+
+void HardwareBridge::HandleLoggingButtons()
+{
+    if (gamepad.left.on_press) StartLogging();
+    if (gamepad.right.on_press) StopLogging();
+}
+
+void HardwareBridge::StartLogging()
+{
+    if (logging_enabled.load(std::memory_order_relaxed)) return;
+    std::lock_guard<std::mutex> lock(log_mutex);
+    log_buffer.clear();
+    if (log_file.is_open()) log_file.close();
+    std::filesystem::create_directories(log_file_path.parent_path());
+    log_file.open(log_file_path);
+    if (!log_file)
+    {
+        std::cerr << "Failed to open log file: " << log_file_path << std::endl;
+        return;
+    }
+    WriteLogHeader();
+    log_time_zero = std::chrono::steady_clock::now();
+    logging_enabled.store(true, std::memory_order_release);
+    std::cout << "Started logging: " << log_file_path << std::endl;
+}
+
+void HardwareBridge::StopLogging()
+{
+    if (!logging_enabled.exchange(false, std::memory_order_acq_rel)) return;
+    std::lock_guard<std::mutex> lock(log_mutex);
+    WriteBufferedLogEntries(log_buffer);
+    log_buffer.clear();
+    log_file.flush();
+    log_file.close();
+    std::cout << "Stopped logging: " << log_file_path << std::endl;
+}
+
+void HardwareBridge::LogCurrentRobotInterface()
+{
+    if (!logging_enabled.load(std::memory_order_acquire)) return;
+    RobotLogEntry entry;
+    entry.iteration = control_iteration;
+    entry.time_seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - log_time_zero).count();
+    entry.state = state_machine.state;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex);
+        entry.robot = robot_interface;
+    }
+    std::lock_guard<std::mutex> lock(log_mutex);
+    if (logging_enabled.load(std::memory_order_relaxed)) log_buffer.push_back(entry);
+}
+
+void HardwareBridge::LoggingLoop()
+{
+    std::lock_guard<std::mutex> lock(log_mutex);
+    if (!log_file.is_open() || log_buffer.size() < log_flush_count) return;
+    std::vector<RobotLogEntry> entries;
+    entries.swap(log_buffer);
+    WriteBufferedLogEntries(entries);
+    log_file.flush();
+}
+
+void HardwareBridge::WriteLogHeader()
+{
+    log_file << "iteration,time_seconds,state";
+    AppendArrayHeaders<12>(log_file, "jpos");
+    AppendArrayHeaders<12>(log_file, "jvel");
+    AppendArrayHeaders<12>(log_file, "tau");
+    AppendArrayHeaders<4>(log_file, "quat");
+    AppendArrayHeaders<3>(log_file, "rpy");
+    AppendArrayHeaders<3>(log_file, "gyro");
+    AppendArrayHeaders<3>(log_file, "projected_gravity");
+    AppendArrayHeaders<3>(log_file, "acc");
+    AppendArrayHeaders<3>(log_file, "torso_pos_est");
+    AppendArrayHeaders<3>(log_file, "torso_vel_world_est");
+    AppendArrayHeaders<3>(log_file, "torso_vel_body_est");
+    AppendArrayHeaders<3>(log_file, "cmd");
+    AppendArrayHeaders<12>(log_file, "jpos_des");
+    AppendArrayHeaders<12>(log_file, "jvel_des");
+    AppendArrayHeaders<12>(log_file, "kp");
+    AppendArrayHeaders<12>(log_file, "kd");
+    AppendArrayHeaders<12>(log_file, "tau_ff");
+    log_file << '\n';
+}
+
+void HardwareBridge::WriteBufferedLogEntries(const std::vector<RobotLogEntry> &entries)
 {
     if (!log_file.is_open()) return;
-    log_file << static_cast<size_t>(state_machine.state);
-    for (float value : ctrl->GetLog()) log_file << ',' << value;
-    log_file << '\n';
+    for (const auto &entry : entries)
+    {
+        const auto &robot = entry.robot;
+        log_file << entry.iteration << ',' << entry.time_seconds << ',' << static_cast<int>(entry.state);
+        AppendArrayValues(log_file, robot.jpos); AppendArrayValues(log_file, robot.jvel);
+        AppendArrayValues(log_file, robot.tau); AppendArrayValues(log_file, robot.quat);
+        AppendArrayValues(log_file, robot.rpy); AppendArrayValues(log_file, robot.gyro);
+        AppendArrayValues(log_file, robot.projected_gravity); AppendArrayValues(log_file, robot.acc);
+        AppendArrayValues(log_file, robot.torso_pos_est); AppendArrayValues(log_file, robot.torso_vel_world_est);
+        AppendArrayValues(log_file, robot.torso_vel_body_est); AppendArrayValues(log_file, robot.cmd);
+        AppendArrayValues(log_file, robot.jpos_des); AppendArrayValues(log_file, robot.jvel_des);
+        AppendArrayValues(log_file, robot.kp); AppendArrayValues(log_file, robot.kd);
+        AppendArrayValues(log_file, robot.tau_ff); log_file << '\n';
+    }
 }

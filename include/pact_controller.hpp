@@ -85,6 +85,7 @@ public:
         base_ang_vel = robot.gyro;
         projected_gravity = robot.projected_gravity;
         cmd = {gamepad.ly, -gamepad.lx, -gamepad.rx};
+        robot.cmd = cmd;
         for (size_t i = 0; i < 12; ++i)
         {
             jpos_processed[i] = robot.jpos[i] - stand_pos[i];
