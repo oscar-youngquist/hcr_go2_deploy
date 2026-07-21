@@ -1,4 +1,5 @@
 #include <chrono>
+#include <exception>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -35,7 +36,15 @@ int main(int argc, char **argv)
     const fs::path log_folder = package_root / "build" / "logs" / timestamp.str();
     fs::create_directories(log_folder);
 
-    HardwareBridge hardware_bridge(config_file.string(), log_folder / "log.csv", real_robot);
-    hardware_bridge.run();
+    try
+    {
+        HardwareBridge hardware_bridge(config_file.string(), log_folder / "log.csv", real_robot);
+        hardware_bridge.run();
+    }
+    catch (const std::exception &error)
+    {
+        std::cerr << "FATAL: " << error.what() << std::endl;
+        return 1;
+    }
     return 0;
 }

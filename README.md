@@ -133,12 +133,64 @@ messages, verify the interface name, physical connection, interface IP/subnet, f
 After DDS passes, start the controller from the repository root:
 
 ```bash
-./build/go2_deploy <ethernet-interface>
+./build/run_go2_deploy.sh <ethernet-interface>
 ```
 
-The real-robot executable disables the `mcf` service before starting low-level control. Place the robot
-on a support fixture, keep the wireless controller and emergency stop available, and validate the state
-transitions before enabling PACT control.
+The generated launcher selects the CycloneDDS libraries from the Unitree SDK2 path supplied to
+CMake, without changing the global shell environment.
+
+While running, the controller prints a status line once per second:
+
+```text
+[status] state=DAMPING lowstate_rx=500/s lowcmd_tx_ok=500/500/s tx_fail_total=0 motor0_q=-0.0721 button_events: none
+```
+
+`lowstate_rx` confirms incoming robot-state traffic. `lowcmd_tx_ok` reports successful DDS writes
+over attempted writes, and `tx_fail_total` is cumulative. A successful DDS write confirms that the
+local DDS writer accepted the command; it is not an acknowledgement from the robot. `state` shows
+the controller state machine, and `button_events` collects relevant wireless-controller button presses
+observed since the previous status line.
+
+### CycloneDDS isolation and future ROS integration
+
+This machine has two different CycloneDDS installations:
+
+- `/opt/unitree_robotics/lib` is the version used by the installed `unitree_sdk2` package.
+- `/usr/local/lib` and the ROS Foxy workspace provide a different CycloneDDS build.
+
+These builds expose libraries with the same names (`libddsc.so.0` and `libddscxx.so.0`) but are not
+binary-compatible. Loading the `/usr/local` libraries into a binary built against the Unitree SDK2
+version can cause allocator failures such as `free(): invalid pointer` or
+`corrupted size vs. prev_size`. A ROS environment can trigger this accidentally by placing
+`/usr/local/lib` or a ROS workspace first in `LD_LIBRARY_PATH`, even though the executable has the
+correct CMake RUNPATH.
+
+For the standalone controller, always use `./build/run_go2_deploy.sh`. The launcher puts the
+configured Unitree SDK2 library directory first for that child process and removes an inherited
+`CYCLONEDDS_URI`. Do not put `/opt/unitree_robotics/lib` first globally in `.bashrc`, because doing so
+can make ROS applications load the Unitree DDS build and fail in the opposite direction.
+
+Future ROS integration must not load both incompatible CycloneDDS builds into one process. Use one
+of these approaches:
+
+1. Build the ROS node, Unitree SDK2, and ROS middleware against one verified-compatible CycloneDDS
+   installation, and confirm the resolved libraries with `ldd`.
+2. Keep this controller in its own process with the Unitree SDK2 runtime environment, keep ROS in a
+   separate process with its ROS runtime environment, and exchange data through a deliberate IPC or
+   ROS bridge boundary.
+
+Before deploying an integrated build, verify its runtime selection:
+
+```bash
+ldd ./build/go2_deploy | grep -E 'libddsc|libddscxx'
+```
+
+For the current SDK2 build, both results must resolve under `/opt/unitree_robotics/lib`.
+
+The real-robot executable uses Unitree SDK2's `MotionSwitcherClient` to release any active high-level
+motion mode before starting low-level control. It fails closed and does not start command output if the
+handoff cannot be verified. Place the robot on a support fixture, keep the wireless controller and
+emergency stop available, and validate the state transitions before enabling PACT control.
 
 ## Demo
 

@@ -43,6 +43,14 @@ int main(int argc, char **argv)
     std::this_thread::sleep_for(std::chrono::seconds(timeout_seconds));
 
     const unsigned int received = message_count.load(std::memory_order_relaxed);
+    const float joint_position = first_joint_position.load(std::memory_order_relaxed);
+
+    // Stop DDS callbacks and release the SDK resources before the callback's
+    // stack-owned state is destroyed.
+    subscriber->CloseChannel();
+    subscriber.reset();
+    ChannelFactory::Instance()->Release();
+
     if (received == 0)
     {
         std::cerr << "FAIL: no Go2 low-state messages received. Check the interface, cable, "
@@ -51,6 +59,6 @@ int main(int argc, char **argv)
     }
 
     std::cout << "PASS: received " << received << " low-state messages; motor 0 q = "
-              << first_joint_position.load(std::memory_order_relaxed) << std::endl;
+              << joint_position << std::endl;
     return 0;
 }

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+unitree_sdk_lib="@PACT_UNITREE_SDK2_ROOT@/lib"
+go2_binary="@CMAKE_CURRENT_BINARY_DIR@/go2_deploy"
+
+if [[ ! -x "${go2_binary}" ]]; then
+    echo "go2_deploy binary not found. Build it first: cmake --build @CMAKE_CURRENT_BINARY_DIR@ -j\$(nproc)" >&2
+    exit 2
+fi
+
+# Do not reuse a ROS workspace's CycloneDDS configuration or libraries. The
+# executable must use the DDS build shipped with the configured Unitree SDK2.
+unset CYCLONEDDS_URI
+export LD_LIBRARY_PATH="${unitree_sdk_lib}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
+exec "${go2_binary}" "$@"

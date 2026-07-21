@@ -50,9 +50,25 @@ target_link_libraries(go2_deploy
     go2_system
 )
 
+# Generate a project-local launcher that selects the CycloneDDS libraries from
+# the same unitree_sdk2 installation used at configure time. This avoids ROS
+# environments overriding them through LD_LIBRARY_PATH.
+configure_file(
+    scripts/run_go2_deploy.sh.in
+    "${CMAKE_CURRENT_BINARY_DIR}/run_go2_deploy.sh"
+    @ONLY)
+
 # Read-only DDS diagnostic: subscribes to rt/lowstate and never publishes commands.
 add_executable(dds_connectivity_test
     tools/dds_connectivity_test.cpp)
 
 target_link_libraries(dds_connectivity_test
     unitree_sdk2)
+
+
+# This is the correct CMake command for this control stack on the jetson
+# cmake -S . -B build \
+#   -DCMAKE_BUILD_TYPE=Release \
+#   -DPACT_CUDA_ROOT=/usr/local/cuda \
+#   -DPACT_TORCH_ROOT=/home/unitree/.local/lib/python3.8/site-packages/torch \
+#   -DPACT_UNITREE_SDK2_ROOT=/opt/unitree_robotics
