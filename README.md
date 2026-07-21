@@ -23,6 +23,7 @@ the Jetson itself.
 2. Build and install [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2) on the target machine:
 
    ```bash
+   apt-get install -y cmake g++ build-essential libyaml-cpp-dev libeigen3-dev libboost-all-dev libspdlog-dev libfmt-dev
    git clone https://github.com/unitreerobotics/unitree_sdk2.git
    cmake -S unitree_sdk2 -B unitree_sdk2/build \
      -DCMAKE_BUILD_TYPE=Release \
