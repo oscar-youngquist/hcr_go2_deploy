@@ -1,6 +1,6 @@
 #pragma once
 
-#include "user_controller.hpp"
+#include "basic_controller.hpp"
 #include <algorithm>
 
 namespace unitree::common
@@ -24,31 +24,17 @@ namespace unitree::common
             return true;
         }
 
-        bool Stand() // stand state, only 
+        bool Stand()
         {
-            if (state == STATES::DAMPING)
-            {
-                state = STATES::STAND;
-                standing_count = 0; // 进入站立状态后重置计数
-                return true;
-            }
-            else // if state is not DAMPING
-            {
-                return false;
-            }
+            state = STATES::STAND;
+            standing_count = 0;
+            return true;
         }
 
-        bool Ctrl() // control state, only in stand state can you enter this state
+        bool Ctrl()
         {
-            if (state == STATES::STAND)
-            {
-                state = STATES::CTRL;
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            state = STATES::CTRL;
+            return true;
         }
 
         /**
@@ -78,12 +64,12 @@ namespace unitree::common
 
     };
 
-    class RLStateMachine: public SimpleStateMachine
+    class PACTStateMachine: public SimpleStateMachine
     {
     public:
         bool Sit()
         {
-            if(state == STATES::DAMPING)
+            if(state == STATES::DAMPING || state == STATES::STAND)
             {
                 state = STATES::SIT;
                 sitting_count = 0; // 进入站立状态后重置计数
@@ -95,18 +81,11 @@ namespace unitree::common
             }
         }
 
-        bool Stand() // stand state, only in sit state can you enter this state
+        bool Stand()
         {
-            if (state == STATES::SIT)
-            {
-                state = STATES::STAND;
-                standing_count = 0; // 进入站立状态后重置计数
-                return true;
-            }
-            else // if state is not SIT
-            {
-                return false;
-            }
+            state = STATES::STAND;
+            standing_count = 0;
+            return true;
         }
 
         /**
@@ -130,6 +109,8 @@ namespace unitree::common
     protected:
         int sitting_count = 0;
         float sitting_percent = 0.0;
-        int sitting_duration = 100;
+        int sitting_duration = 200;
     };
+
+    using RLStateMachine = PACTStateMachine;
 } // namespace unitree

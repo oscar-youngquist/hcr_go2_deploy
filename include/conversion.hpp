@@ -8,7 +8,7 @@
 namespace unitree::common
 {
 
-    void motorCmd2Dds(UNITREE_LEGGED_SDK::MotorCmd *raw, std::array<unitree_go::msg::dds_::MotorCmd_, 20> &dds)
+    inline void motorCmd2Dds(UNITREE_LEGGED_SDK::MotorCmd *raw, std::array<unitree_go::msg::dds_::MotorCmd_, 20> &dds)
     {
         for (int i = 0; i < 20; i++)
         {
@@ -23,14 +23,14 @@ namespace unitree::common
         }
     };
 
-    void bmsCmd2Dds(UNITREE_LEGGED_SDK::BmsCmd &raw, unitree_go::msg::dds_::BmsCmd_ &dds)
+    inline void bmsCmd2Dds(UNITREE_LEGGED_SDK::BmsCmd &raw, unitree_go::msg::dds_::BmsCmd_ &dds)
     {
         dds.off(raw.off);
 
         memcpy(&dds.reserve()[0], &raw.reserve[0], 3);
     };
 
-    uint32_t crc32_core(uint32_t *ptr, uint32_t len)
+    inline uint32_t crc32_core(uint32_t *ptr, uint32_t len)
     {
         uint32_t xbit = 0;
         uint32_t data = 0;
@@ -58,7 +58,7 @@ namespace unitree::common
         return CRC32;
     };
 
-    void lowCmd2Dds(UNITREE_LEGGED_SDK::LowCmd &raw, unitree_go::msg::dds_::LowCmd_ &dds)
+    inline void lowCmd2Dds(UNITREE_LEGGED_SDK::LowCmd &raw, unitree_go::msg::dds_::LowCmd_ &dds)
     {
         // with crc
         memcpy(&dds.head()[0], &raw.head[0], 2);

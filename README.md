@@ -9,37 +9,63 @@ Deployment code of RL policy on Unitree Go2 robot, using policies from [genesis_
 
 ## Installation
 
-1. Install [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2)
+The controller must be built natively for the target architecture. In particular, do not copy the
+x86-64 LibTorch, SDK2 libraries, or `build/` directory to a Jetson. Build/install aarch64 versions on
+the Jetson itself.
+
+1. Install `yaml-cpp`:
+
+   ```bash
+   sudo apt update
+   sudo apt install libyaml-cpp-dev
+   ```
+
+2. Build and install [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2) on the target machine:
+
    ```bash
    git clone https://github.com/unitreerobotics/unitree_sdk2.git
-   cd unitree_sdk2/
-   mkdir build
-   cd build
-   cmake .. -DCMAKE_INSTALL_PREFIX=/opt/unitree_robotics
-   sudo make install
+   cmake -S unitree_sdk2 -B unitree_sdk2/build \
+     -DCMAKE_BUILD_TYPE=Release \
+     -DCMAKE_INSTALL_PREFIX=/opt/unitree_robotics
+   cmake --build unitree_sdk2/build -j$(nproc)
+   sudo cmake --install unitree_sdk2/build
    ```
 
-2. Install [LibTorch](https://pytorch.org/)
+3. Build or install LibTorch for the target machine. On a Jetson, it must be an aarch64 build compatible
+   with the JetPack CUDA version installed on that Jetson. Record these machine-specific paths:
+
+   - `PACT_TORCH_ROOT`: directory containing `share/cmake/Torch/TorchConfig.cmake` and `lib/`
+   - `PACT_CUDA_ROOT`: CUDA toolkit directory containing `bin/nvcc`, normally `/usr/local/cuda`
+   - `PACT_UNITREE_SDK2_ROOT`: SDK2 installation prefix, normally `/opt/unitree_robotics`
+
+   Confirm that the libraries match the machine before configuring:
+
    ```bash
-   # For Nvidia Jetson
-   wget https://download.pytorch.org/libtorch/cu118/libtorch-cxx11-abi-shared-with-deps-2.7.1%2Bcu118.zip # modify cuda version
-   # For x86_64 PC
-   wget https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.8.0%2Bcpu.zip
-
-   # unzip the file and get libtorch folder
-   # the CMAKE_PREFIX_PATH in CMakeLists.txt should be modified according to your installation path of libtorch
-   set(CMAKE_PREFIX_PATH /home/username/libtorch)     # in CMakeLists.txt
+   uname -m
+   file /path/to/libtorch/lib/libtorch.so
+   file /opt/unitree_robotics/lib/libddsc.so
+   /usr/local/cuda/bin/nvcc --version
    ```
 
-3. Clone this repo and compile
+   On the Jetson, `uname -m` and the libraries should report `aarch64`/`ARM aarch64`, not `x86-64`.
+
+4. Configure and build the deployment code with paths for that machine:
+
    ```bash
-   # clone the repo
-   git clone https://github.com/lupinjia/go2_deploy.git
-   mkdir build && cd build
-   cmake .. && make
+   cmake -S . -B build \
+     -DCMAKE_BUILD_TYPE=Release \
+     -DPACT_CUDA_ROOT=/usr/local/cuda \
+     -DPACT_TORCH_ROOT=/path/to/aarch64/libtorch \
+     -DPACT_UNITREE_SDK2_ROOT=/opt/unitree_robotics
+   cmake --build build -j$(nproc)
    ```
 
-4. Clone unitree_mujoco and compile (for simulation in mujoco)
+   The workstation can use different values. When LibTorch is located at the repository-adjacent
+   `../libtorch` and SDK2 is installed under `/opt/unitree_robotics`, only `PACT_CUDA_ROOT` needs to be
+   supplied. CMake stores these values in `build/CMakeCache.txt`; use a separate build directory per
+   machine or delete the build directory when moving the source tree between machines.
+
+5. Clone unitree_mujoco and compile (for simulation in mujoco)
    
    1. install mujoco
       ```bash
@@ -74,38 +100,45 @@ Deployment code of RL policy on Unitree Go2 robot, using policies from [genesis_
 2. Start the controller
    ```bash
    cd go2_deploy/build
-   # wtw controller
-   ./go2_deploy wtw
-   # ts controller
-   ./go2_deploy ts
+   ./go2_deploy
    ```
 3. Play with the joystick
    - Common state machine logic:
       - L1 + R1 -> Sit
       - L1 + R2 -> Stand
       - L1 + A -> Ctrl
-      - L1 + Y -> Stop
-   - For wtw controller:
-      - left: gait period ⬆️
-      - right: gait period ⬇️
-      - up: base height ⬆️
-      - down: base height ⬇️
-      - A: foot clearance ⬆️
-      - B: foot clearance ⬇️
-      - X: pitch angle ⬆️
-      - Y: pitch angle ⬇️
-      - R1 and R2: change gait type
+      - L1 + B -> Stop
 
 ## Sim2Real
 
+Connect the Jetson's Ethernet port to the Go2 expansion dock and identify the wired interface:
+
 ```bash
-# Check your ethernet interface name
-ifconfig
-# wtw controller
-./go2_deploy wtw ethernet_name
-# ts controller
-./go2_deploy ts ethernet_name
+ip -brief link
+ip -brief address
 ```
+
+Before running the controller, use the read-only DDS test. It subscribes to `rt/lowstate`; it does not
+publish motor commands or disable the Go2 motion service:
+
+```bash
+./scripts/test_dds_connectivity.sh <ethernet-interface> 5
+# Example:
+./scripts/test_dds_connectivity.sh eth0 5
+```
+
+A working connection prints `PASS` and the number of low-state messages received. If it reports no
+messages, verify the interface name, physical connection, interface IP/subnet, firewall, and SDK2 build.
+
+After DDS passes, start the controller from the repository root:
+
+```bash
+./build/go2_deploy <ethernet-interface>
+```
+
+The real-robot executable disables the `mcf` service before starting low-level control. Place the robot
+on a support fixture, keep the wireless controller and emergency stop available, and validate the state
+transitions before enabling PACT control.
 
 ## Demo
 

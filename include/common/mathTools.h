@@ -13,7 +13,7 @@
  * @param angle the input angle
  * @return the wrapped angle
  */
-float wrap_to_pi(float angle)
+inline float wrap_to_pi(float angle)
 {
     while(angle > M_PI) angle -= 2*M_PI;
     while(angle < -M_PI) angle += 2*M_PI;
@@ -27,14 +27,14 @@ float wrap_to_pi(float angle)
  * @param high_limit the upper limit
  * @return the clipped value
  */
-float clip(float value, float low_limit, float high_limit)
+inline float clip(float value, float low_limit, float high_limit)
 {
     if(value <= low_limit) return low_limit;
     if(value >= high_limit) return high_limit;
     return value;
 }
 
-float max_abs(std::array<float, 12> arr)
+inline float max_abs(std::array<float, 12> arr)
 {
     float max_abs = 0.0;
     for(int i=0; i<12; i++){

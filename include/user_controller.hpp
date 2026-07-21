@@ -8,6 +8,7 @@
 #include <deque>
 
 #include "torch/script.h"
+#include "basic_controller.hpp"
 #include "robot_interface.hpp"
 #include "gamepad.hpp"
 #include "param/cfg.hpp"
@@ -16,42 +17,6 @@ namespace fs = std::filesystem;
 
 namespace unitree::common
 {
-class BasicUserController
-{
-public:
-    BasicUserController() {}
-
-    virtual void loadParam() = 0;
-
-    virtual void loadPolicy() = 0;
-
-    virtual void reset(BasicRobotInterface &robot_interface, Gamepad &gamepad) = 0;
-
-    virtual void GetInput(BasicRobotInterface &robot_interface, Gamepad &gamepad) = 0;
-
-    virtual void DummyCalculate() = 0;
-
-    virtual void Calculate() = 0;
-
-    virtual std::vector<float> GetLog() = 0;
-
-    void save_jpos(BasicRobotInterface &robot_interface)
-    {
-        std::copy(robot_interface.jpos.begin(), robot_interface.jpos.end(), start_pos.begin());
-    }
-
-    float dt;
-    float stand_kp;
-    float stand_kd;
-    float ctrl_kp;
-    float ctrl_kd;
-    std::array<float, 12> start_pos; // 阻尼状态的位置
-    std::array<float, 12> stand_pos; // 站立状态最终位置
-    std::array<float, 12> jpos_des;
-    std::array<float, 12> sit_pos; // sit状态最终位置
-};
-
-
 class SimpleRLController : public BasicUserController
 {
 public:

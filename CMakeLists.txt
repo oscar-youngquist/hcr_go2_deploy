@@ -1,38 +1,58 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-# Keep Torch/Caffe2 on a single CUDA toolkit version. On this machine
-# /usr/local/cuda points to 12.9, but the LibTorch package was set up against 12.4.
-set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda-12.4")
-set(CUDAToolkit_ROOT "/usr/local/cuda-12.4")
-set(CMAKE_CUDA_COMPILER "/usr/local/cuda-12.4/bin/nvcc")
+# Machine-specific dependency roots. Supply these with -D on each machine.
+set(PACT_CUDA_ROOT "" CACHE PATH "CUDA toolkit root (for example /usr/local/cuda)")
+set(PACT_TORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../libtorch" CACHE PATH "LibTorch installation root")
+set(PACT_UNITREE_SDK2_ROOT "/opt/unitree_robotics" CACHE PATH "unitree_sdk2 installation prefix")
+
+if(PACT_CUDA_ROOT)
+    set(CUDA_TOOLKIT_ROOT_DIR "${PACT_CUDA_ROOT}" CACHE PATH "" FORCE)
+    set(CUDAToolkit_ROOT "${PACT_CUDA_ROOT}" CACHE PATH "" FORCE)
+    set(CMAKE_CUDA_COMPILER "${PACT_CUDA_ROOT}/bin/nvcc" CACHE FILEPATH "" FORCE)
+endif()
 
 project(go2_deploy LANGUAGES CXX)
 
-SET(CMAKE_CXX_STANDARD 17)
-list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+list(PREPEND CMAKE_PREFIX_PATH
+    "${PACT_UNITREE_SDK2_ROOT}"
+    "${PACT_TORCH_ROOT}")
+
+set(Torch_DIR "${PACT_TORCH_ROOT}/share/cmake/Torch" CACHE PATH "Directory containing TorchConfig.cmake")
+
 find_package(unitree_sdk2 REQUIRED)
-
-# set(CMAKE_PREFIX_PATH /home/lupinjia/libtorch)  # Change the path to your LibTorch
-
-# Point CMake at the LibTorch install root
-list(APPEND CMAKE_PREFIX_PATH "${PROJECT_SOURCE_DIR}/../libtorch")
-
-message("-- CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
-
-# Optional: if auto-discovery still fails, use this instead:
-set(Torch_DIR "${PROJECT_SOURCE_DIR}/../libtorch/share/cmake/Torch")
-
 find_package(Torch REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
-include_directories(
-    include 
+message(STATUS "Target processor: ${CMAKE_SYSTEM_PROCESSOR}")
+message(STATUS "CUDA root: ${PACT_CUDA_ROOT}")
+message(STATUS "Torch root: ${PACT_TORCH_ROOT}")
+message(STATUS "unitree_sdk2 root: ${PACT_UNITREE_SDK2_ROOT}")
+
+add_library(go2_system
+    src/HardwareBridge.cpp)
+
+target_include_directories(go2_system PUBLIC
+    include
     ${TORCH_INCLUDE_DIRS})
 
-add_executable(go2_deploy 
-src/main.cpp)
+target_link_libraries(go2_system
+    unitree_sdk2
+    yaml-cpp
+    ${TORCH_LIBRARIES})
+
+add_executable(go2_deploy
+    src/main.cpp)
 
 target_link_libraries(go2_deploy
-    unitree_sdk2 
-    yaml-cpp
-    ${TORCH_LIBRARIES}
-    )
+    go2_system
+)
+
+# Read-only DDS diagnostic: subscribes to rt/lowstate and never publishes commands.
+add_executable(dds_connectivity_test
+    tools/dds_connectivity_test.cpp)
+
+target_link_libraries(dds_connectivity_test
+    unitree_sdk2)
