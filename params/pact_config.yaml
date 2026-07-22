@@ -1,4 +1,4 @@
-policy_name: "Jun16_17-05-56_go2_pact_100hz.pt"
+policy_name: "Jul21_19-42-17_go2_pact_100hz_spec.pt"
 dt: 0.01
 command_limit_max_abs: [1.0, 0.5, 1.0]  # [linear_x m/s, linear_y m/s, angular_z rad/s]
 lowstate_timeout_ms: 100
