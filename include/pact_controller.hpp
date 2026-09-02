@@ -82,10 +82,15 @@ public:
 
     void GetInput(BasicRobotInterface &robot, Gamepad &gamepad) override
     {
+        GetInput(robot, {gamepad.ly, -gamepad.lx, -gamepad.rx});
+    }
+
+    void GetInput(BasicRobotInterface &robot, const std::array<float, 3> &command)
+    {
         base_ang_vel = robot.gyro;
         projected_gravity = robot.projected_gravity;
-        cmd = {gamepad.ly, -gamepad.lx, -gamepad.rx};
-        robot.cmd = cmd;
+        cmd = command;
+        robot.cmd = command;
         for (size_t i = 0; i < 12; ++i)
         {
             jpos_processed[i] = robot.jpos[i] - stand_pos[i];
